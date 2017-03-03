@@ -1,4 +1,10 @@
 var Promise = (function() {
+	var STATUS_PENDING = 'pending',
+		STATUS_RESOLVE = 'resolved',
+		STATUS_REJECT  = 'rejected',
+		p = Promise.prototype;
+
+
 	function Promise(resolver){
 		// Promise构造函数的参数必须是函数
 		if (typeof resolver !== 'function'){
@@ -7,9 +13,12 @@ var Promise = (function() {
 
 		if (!(this instanceof Promise)) return new Promise(resolver);
 
-		var self = this;
+        /* Promise对象的三种状态 */
+		
+		 var self = this;
+
 		self.callbacks = [];
-		self.status = 'pending';
+		self.status = STATUS_PENDING;
 
 		function resolve(value) {
 			// 链式调用
@@ -18,13 +27,13 @@ var Promise = (function() {
 			}
 
 			setTimeout(function() {
-				if (self.status !== 'pending') {
+				if (self.status !== STATUS_PENDING) {
 					return ;
 				}
-				self.status = 'resolved';
+				self.status = STATUS_RESOLVE;
 				self.data = value;
 
-				for (var i = 0; i < self.callbacks.length; i++){
+				for (var i = 0, len = self.callbacks.length; i < len; i++){
 					self.callbacks[i].onResolved(value);
 				}
 			})
@@ -32,14 +41,14 @@ var Promise = (function() {
 
 		function reject(reason) {
 			setTimeout(function(){
-				if (self.status !== 'pending'){
+				if (self.status !== STATUS_PENDING){
 					return ;
 				}
 
-				self.status = 'rejected';
+				self.status = STATUS_REJECT;
 				self.data = reason;
 
-				for (var i = 0; i< self.callbacks.length; i++){
+				for (var i = 0, len = self.callbacks.length; i < len; i++){
 					self.callbacks[i].onRejected(reason);
 				}
 			})
@@ -52,30 +61,30 @@ var Promise = (function() {
 		}
 	}
 
-	function resolvePromise(promise, x, resolve, reject){
+	function resolvePromise(promise, chain, resolve, reject){
 		var then,
 			thenCallerOrThrow = false;
 
-		if (promise === x) {
+		if (promise === chain) {
 			return reject(new TypeError('Chaining cycle detected for promise!'));
 		}
 
-		if (x instanceof Promise) {
-			if (x.status === 'pending') {
-				x.then(function(v) {
-					resolvePromise(promise, v, resolve, reject);
+		if (chain instanceof Promise) {
+			if (chain.status === STATUS_PENDING) {
+				chain.then(function(value) {
+					resolvePromise(promise, value, resolve, reject);
 				}, reject);
 			} else {
-				x.then(resolve, reject);
+				chain.then(resolve, reject);
 			}
 			return ;
 		}
 
-		if ((x !== null) && ((typeof x === 'object') || (typeof x === 'function'))) {
+		if ((chain !== null) && ((typeof chain === 'object') || (typeof chain === 'function'))) {
 			try {
-				then = x.then;
+				then = chain.then;
 				if (typeof then === 'function') {
-					then.call(x, function rs(y) {
+					then.call(chain, function rs(y) {
 						if (thenCallerOrThrow) { return }
 						thenCallerOrThrow = true;
 						return resolvePromise(promise, y, resolve, reject);
@@ -85,7 +94,7 @@ var Promise = (function() {
 						return reject(r);
 					})
 				} else {
-					return resolve(x);
+					return resolve(chain);
 				}
 			} catch(e) {
 				if (thenCallerOrThrow) { return }
@@ -93,17 +102,18 @@ var Promise = (function() {
 				return reject(e);
 			}
 		} else {
-			return resolve(x);
+			return resolve(chain);
 		}
 	}
 
-	Promise.prototype.then = function(onResolved, onRejected) {
+	/* then方法传入参数为两个函数 */
+	p.then = function(onResolved, onRejected) {
 		onResolved = typeof onResolved === 'function' ? onResolved : function(v) { return v; }
 		onRejected = typeof onRejected === 'function' ? onRejected : function(r) { return r; }
-		var self = this;
-		var promise2;
+		var self = this,
+		    promise2;
 
-		if (self.status === 'pending') {
+		if (self.status === STATUS_PENDING) {
 			return promise2 = new Promise(function(resolve, reject) {
 				self.callbacks.push({
 					onResolved: function(value){
@@ -126,7 +136,7 @@ var Promise = (function() {
 			})
 		}
 
-		if (self.status === 'resolved') {
+		if (self.status === STATUS_RESOLVE) {
 			return promise2 = new Promise(function(resolve, reject){
 				setTimeout(function(){
 					try {
@@ -139,7 +149,7 @@ var Promise = (function() {
 			})
 		}
 
-		if (self.status === 'reject'){
+		if (self.status === STATUS_REJECT){
 			return promise2 = new Promise(function(resolve, reject){
 				setTimeout(function(){
 					try{
@@ -154,13 +164,13 @@ var Promise = (function() {
 
 	}
 
-	Promise.prototype.spread = function(fn, onRejected) {
+	p.spread = function(fn, onRejected) {
 		return this.then(function(values){
 			return fn.apply(null, values);
 		}, onRejected);
 	}
 
-	Promise.prototype.inject = function(fn, onRejected) {
+	p.inject = function(fn, onRejected) {
 		return this.then(function(v) {
 			return fn.apply(null, fn.toString().match(/\((.*?)\)/)[1].split(',').map(function(key){
 				return v[key];
@@ -168,7 +178,7 @@ var Promise = (function() {
 		}, onRejected);
 	}
 
-	Promise.prototype.delay = function(duration) {
+	p.delay = function(duration) {
 		return this.then(function(value) {
 			return new Promise(function(resolve, reject) {
 				setTimeout(function() {
@@ -184,36 +194,35 @@ var Promise = (function() {
 		})
 	}
 	
-
-	Promise.prototype.valueOf = function() {
+	p.valueOf = function() {
 		return this.data;
 	}
 
-	Promise.prototype.catch = function() {
+	p.catch = function(onRejected) {
 		return this.then(null, onRejected);
 	}
 
-	Promise.prototype.resolve = function(value) {
+	p.resolve = function(value) {
 		return new Promise(function(resolve){
 			resolve(value);
 		})
 	}
 
-	Promise.prototype.reject = function(reason) {
+	p.reject = function(reason) {
 		return new Promise(function(resolve, reject) {
 			reject(reason);
 		})
 	}
 
-	Promise.prototype.fcall = function(fn) {
+	p.fcall = function(fn) {
 		return Promise.resolve().then(fn);
 	}
 
-	Promise.done = Promise.stop = function() {
+	p.done = p.stop = function() {
 		return new Promise(function(){})
 	}
 
-	Promise.prototype.finally = function(fn) {
+	p.finally = function(fn) {
 		return this.then(function(v) {
 			setTimeout(fn);
 			return v;
@@ -223,7 +232,7 @@ var Promise = (function() {
 		})
 	} 
 
-	Promise.all = function(promises) {
+	p.all = function(promises) {
 		return new Promise(function(resolve, reject){
 			var resolvedCounter = 0;
 			var promiseNum = promises.length;
@@ -245,7 +254,7 @@ var Promise = (function() {
 		})
 	}
 
-	Promise.race = function(promises) {
+	p.race = function(promises) {
 		return new Promise(function(resolve, reject){
 			for (var i = 0; i< promises.length; i++) {
 				Promise.resolve(promise[i]).then(function(value){
@@ -257,7 +266,7 @@ var Promise = (function() {
 		})
 	}
 
-	Promise.prototype.deferred = Promise.prototype.defer = function() {
+	p.deferred = p.defer = function() {
 		var dfd = {};
 		dfd.promise  = new Promise(function(resolve, reject) {
 			dfd.resolve = resolve;
